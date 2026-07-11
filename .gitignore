@@ -1,0 +1,11 @@
+env/
+env_convert/
+data/
+*.keras
+*.h5
+*.bin
+__pycache__/
+.DS_Store
+tfjs_model/
+tfjs_model_new/
+saved_model_export/

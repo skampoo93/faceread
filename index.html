@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>FaceRead IA — Détection d'émotions</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f0f0f;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    h1 { color: #7F77DD; margin-bottom: 0.4rem; font-size: 1.6rem; }
+    .subtitle { color: #555; font-size: 13px; margin-bottom: 1.5rem; }
+    .main { display: flex; gap: 2rem; align-items: flex-start; }
+    .video-wrapper { position: relative; width: 480px; height: 360px; }
+    #webcam {
+      width: 480px; height: 360px;
+      border-radius: 12px;
+      border: 2px solid #7F77DD;
+      object-fit: cover;
+    }
+    #overlay {
+      position: absolute; top: 0; left: 0;
+      width: 480px; height: 360px;
+      border-radius: 12px; pointer-events: none;
+    }
+    .panel { width: 220px; display: flex; flex-direction: column; gap: 1rem; }
+    .emotion-card {
+      background: #1a1a2e; border: 1px solid #2a2a4a;
+      border-radius: 12px; padding: 1.2rem; text-align: center;
+    }
+    .emotion-emoji { font-size: 2.5rem; margin-bottom: 0.3rem; }
+    .emotion-label { font-size: 12px; color: #666; margin-bottom: 0.4rem; }
+    .emotion-value { font-size: 2rem; font-weight: bold; color: #7F77DD; min-height: 2.5rem; }
+    .confidence-value { font-size: 1rem; color: #1D9E75; margin-top: 0.3rem; }
+    .bars { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1rem; }
+    .bars-title { font-size: 12px; color: #666; margin-bottom: 0.8rem; }
+    .bar-row { margin-bottom: 0.5rem; }
+    .bar-label { font-size: 11px; color: #aaa; display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .bar-track { background: #111; border-radius: 4px; height: 6px; }
+    .bar-fill { height: 6px; border-radius: 4px; background: #7F77DD; transition: width 0.3s ease; }
+    .buttons { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    button {
+      flex: 1; padding: 10px; border-radius: 8px; border: none;
+      font-size: 14px; cursor: pointer; font-weight: bold;
+    }
+    #btnStart { background: #7F77DD; color: white; }
+    #btnStop  { background: #E24B4A; color: white; }
+    #status {
+      background: #1a1a1a; border: 1px solid #2a2a2a;
+      border-radius: 8px; padding: 0.8rem 1rem;
+      font-family: monospace; font-size: 11px; color: #1D9E75;
+      width: 100%; max-width: 720px; margin-top: 1.2rem;
+      height: 80px; overflow-y: auto;
+    }
+    .loading-overlay {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8); border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: #7F77DD; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>FaceRead IA</h1>
+  <p class="subtitle">CNN from scratch — FER2013 — 67.3% accuracy</p>
+
+  <div class="main">
+    <div>
+      <div class="video-wrapper">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="loading-overlay" id="loadingOverlay">Chargement du modèle CNN...</div>
+      </div>
+      <div class="buttons">
+        <button id="btnStart" onclick="startCamera()">Démarrer</button>
+        <button id="btnStop"  onclick="stopCamera()">Arrêter</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="emotion-card">
+        <div class="emotion-emoji" id="emoji">😐</div>
+        <div class="emotion-label">Émotion détectée</div>
+        <div class="emotion-value" id="emotionName">—</div>
+        <div class="confidence-value" id="confidence">—</div>
+      </div>
+      <div class="bars">
+        <div class="bars-title">Toutes les émotions</div>
+        <div id="allBars"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status">> En attente...</div>
+
+  <script>
+    const EMOTIONS = ['angry','disgust','fear','happy','neutral','sad','surprise'];
+    const EMOJIS   = { angry:'😠', disgust:'🤢', fear:'😨', happy:'😊', neutral:'😐', sad:'😢', surprise:'😲' };
+    const LABELS_FR = { angry:'Colère', disgust:'Dégoût', fear:'Peur', happy:'Joie', neutral:'Neutre', sad:'Tristesse', surprise:'Surprise' };
+
+    let model = null;
+    let stream = null;
+    let animFrame = null;
+
+    // Barres
+    const barsContainer = document.getElementById('allBars');
+    EMOTIONS.forEach(e => {
+      barsContainer.innerHTML += `
+        <div class="bar-row">
+          <div class="bar-label"><span>${LABELS_FR[e]}</span><span id="pct-${e}">0%</span></div>
+          <div class="bar-track"><div class="bar-fill" id="bar-${e}" style="width:0%"></div></div>
+        </div>`;
+    });
+
+    function log(msg) {
+      const el = document.getElementById('status');
+      el.innerHTML += `<br>[${new Date().toLocaleTimeString()}] ${msg}`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function loadModel() {
+      log('Chargement du modèle CNN...');
+      model = await tf.loadLayersModel('tfjs_model/model.json');
+      document.getElementById('loadingOverlay').style.display = 'none';
+      log('Modèle CNN chargé — 67.3% accuracy sur FER2013 !');
+    }
+
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const video = document.getElementById('webcam');
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        log('Caméra activée — analyse en cours...');
+        detectLoop();
+      } catch(e) {
+        log('Erreur caméra : ' + e.message);
+      }
+    }
+
+    async function detectLoop() {
+      if (!stream || !model) return;
+      const video  = document.getElementById('webcam');
+      const canvas = document.getElementById('overlay');
+      const ctx    = canvas.getContext('2d');
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      // Prétraitement — identique à l'entraînement
+      const tensor = tf.tidy(() => {
+        const img = tf.browser.fromPixels(video)
+        // Conversion RGB -> grayscale comme OpenCV
+        // 0.299*R + 0.587*G + 0.114*B
+        const r = img.slice([0,0,0], [-1,-1,1]).mul(0.299)
+        const g = img.slice([0,0,1], [-1,-1,1]).mul(0.587)
+        const b = img.slice([0,0,2], [-1,-1,1]).mul(0.114)
+        const gray = r.add(g).add(b)
+        const resized = tf.image.resizeBilinear(gray, [48, 48])
+        const normalized = resized.div(255.0)
+        return normalized.expandDims(0)
+      });
+
+      const output = model.predict(tensor);
+      const preds = await output.data();
+      tensor.dispose();
+      output.dispose();
+
+      // Émotion dominante
+      const maxIdx = preds.indexOf(Math.max(...preds));
+      const emotion = EMOTIONS[maxIdx];
+      const pct     = Math.round(preds[maxIdx] * 100);
+
+      document.getElementById('emoji').textContent       = EMOJIS[emotion];
+      document.getElementById('emotionName').textContent = LABELS_FR[emotion];
+      document.getElementById('confidence').textContent  = pct + '% de confiance';
+
+      // Barres
+      EMOTIONS.forEach((e, i) => {
+        const v = Math.round(preds[i] * 100);
+        document.getElementById('bar-' + e).style.width = v + '%';
+        document.getElementById('pct-' + e).textContent  = v + '%';
+      });
+
+      animFrame = requestAnimationFrame(detectLoop);
+    }
+
+    function stopCamera() {
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+      document.getElementById('emotionName').textContent = '—';
+      document.getElementById('emoji').textContent = '😐';
+      document.getElementById('confidence').textContent = '—';
+      EMOTIONS.forEach(e => {
+        document.getElementById('bar-' + e).style.width = '0%';
+        document.getElementById('pct-' + e).textContent = '0%';
+      });
+      log('Caméra arrêtée.');
+    }
+
+    loadModel();
+  </script>
+</body>
+</html>
