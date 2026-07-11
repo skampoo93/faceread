@@ -34,7 +34,7 @@ def load_images(folder):
     return np.array(X), np.array(y)
 
 print("Chargement du modele...")
-model = load_model('best_model_v4.keras')
+model = load_model('best_model_v4.keras', safe_mode=False)
 
 print("Chargement des donnees de test...")
 X_test, y_test_raw = load_images('data/test')

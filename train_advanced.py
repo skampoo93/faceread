@@ -194,6 +194,7 @@ print(f"Meilleure val          : {max(history.history['val_accuracy']):.2%}")
 
 # ── 11. SAUVEGARDE DE L'HISTORIQUE ─────────────────────────────────
 import json
+history_serializable = {k: [float(v) for v in vals] for k, vals in history.history.items()}
 with open('history.json', 'w') as f:
-    json.dump(history.history, f)
+    json.dump(history_serializable, f)
 print("Historique sauvegardé dans history.json")
