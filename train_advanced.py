@@ -191,3 +191,9 @@ loss, acc = model.evaluate(X_test, y_test, verbose=0)
 print(f"\nTest accuracy (normal) : {acc:.2%}")
 print(f"Test accuracy (TTA)    : {tta_acc:.2%}")
 print(f"Meilleure val          : {max(history.history['val_accuracy']):.2%}")
+
+# ── 11. SAUVEGARDE DE L'HISTORIQUE ─────────────────────────────────
+import json
+with open('history.json', 'w') as f:
+    json.dump(history.history, f)
+print("Historique sauvegardé dans history.json")
