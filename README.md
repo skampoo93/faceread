@@ -35,6 +35,7 @@ Fear and Sad are the hardest classes - they often get confused with Neutral/Angr
 
 ## Architecture
 
+```
 Input (48x48x1 grayscale)
   Block 1: Conv2D(64)x2 -> BN -> ReLU -> MaxPool -> Dropout
   Block 2: Conv2D(128)x2 -> BN -> ReLU -> MaxPool -> Dropout
@@ -44,6 +45,7 @@ Input (48x48x1 grayscale)
   Dense(512) -> BN -> ReLU -> Dropout(0.5)
   Dense(256) -> BN -> ReLU -> Dropout(0.3)
   Dense(7, softmax)
+```
 
 ~2.7M parameters.
 
